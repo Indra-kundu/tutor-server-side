@@ -25,27 +25,14 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 async function run() {
     try {
         await client.connect();
+
+
         const db = client.db("edubridge");
 
-        // BetterAuth কনফিগারেশন
-        const auth = betterAuth({
-            baseURL: process.env.BETTER_AUTH_URL || "http://localhost:5000",
-            database: mongodbAdapter(db),
-            emailAndPassword: {
-                enabled: true,
-            },
-            socialProviders: {
-                google: {
-                    clientId: process.env.GOOGLE_CLIENTID || "",
-                    clientSecret: process.env.GOOGLE_SECRET || "",
-                },
-            },
-        });
-        // BetterAuth রাউট হ্যান্ডলার (এটি সাইনআপ, সাইনইন সব হ্যান্ডেল করবে)
-        app.all("/api/auth/:action", toNodeHandler(auth));
-        const tutorCollection = db.collection("tutors");
 
-        // --- আপনার আগের রাউটগুলো ---
+        const tutorCollection = db.collection("tutors");
+        const bookingCollection = db.collection("bookings");
+
         app.get('/tutor', async (req, res) => {
             const result = await tutorCollection.find().toArray();
             res.json(result);
@@ -55,6 +42,21 @@ async function run() {
             const tutorData = req.body;
             const result = await tutorCollection.insertOne(tutorData);
             res.json(result);
+        });
+
+
+        app.get('/booking', async (req, res) => {
+            const { userId } = req.params;
+            const result = await bookingCollection.find({ userId: userId }).toArray();
+            res.json(result);
+
+        });
+        app.post('/booking', async (req, res) => {
+            const bookingData = req.body;
+            const result = await bookingCollection.insertOne(bookingData);
+
+            res.json(result);
+
         });
 
         app.get('/tutor/:id', async (req, res) => {

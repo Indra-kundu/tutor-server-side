@@ -6,6 +6,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const { betterAuth } = require("better-auth");
 const { mongodbAdapter } = require("better-auth/adapters/mongodb");
 const { toNodeHandler } = require("better-auth/node");
+const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
 
 dotenv.config()
 const app = express()
@@ -22,6 +23,32 @@ const client = new MongoClient(process.env.MONGODB_URI, {
     }
 });
 
+const JWKS = createRemoteJWKSet(new URL(`http://localhost:3000/api/auth/jwks`));
+
+const verifyToken = async (req, res, next) => {
+    const authHeader = req?.headers.authorization;
+    console.log(authHeader)
+    if (!authHeader) {
+        return res.status(401).json({ message: 'unauthorized' });
+    }
+    const token = authHeader.split(" ")[1];
+    if (!token) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+
+    try {
+        const { payload } = await jwtVerify(token, JWKS);
+        console.log(payload);
+        next();
+    } catch (error) {
+        console.log(error);
+        return res.status(403).json({ message: "Forbidden" });
+    }
+
+};
+
+
 async function run() {
     try {
         await client.connect();
@@ -34,22 +61,18 @@ async function run() {
         const bookingCollection = db.collection("bookings");
 
 
-        // index.js
         app.get('/tutors-top', async (req, res) => {
-            // limit(6) মানে মাত্র ৬টি ডেটা আসবে
             const result = await tutorCollection.find().limit(6).toArray();
             res.send(result);
         });
 
 
-        // ১. লগড-ইন ইউজারের নিজস্ব টিউটরগুলো দেখার জন্য (My Tutors Page)
-        app.get('/my-tutors/:email', async (req, res) => {
+        app.get('/my-tutors/:email', verifyToken, async (req, res) => {
             const { email } = req.params;
             const result = await tutorCollection.find({ userEmail: email }).toArray();
             res.json(result);
         });
 
-        // ২. টিউটর আপডেট করার জন্য (Edit Functionality)
         app.put('/update-tutor/:id', async (req, res) => {
             const { id } = req.params;
             const updatedData = req.body;
@@ -60,7 +83,6 @@ async function run() {
             res.json(result);
         });
 
-        // ৩. টিউটর ডিলিট করার জন্য (Delete Functionality)
         app.delete('/delete-tutor/:id', async (req, res) => {
             const { id } = req.params;
             const result = await tutorCollection.deleteOne({ _id: new ObjectId(id) });
@@ -93,28 +115,24 @@ async function run() {
 
 
 
-        app.post('/booking', async (req, res) => {
+        app.post('/booking', verifyToken, async (req, res) => {
             const bookingData = req.body;
             const tutorId = bookingData.tutorId;
 
-            // ১. টিউটর খুঁজে স্লট চেক করুন
             const tutor = await tutorCollection.findOne({ _id: new ObjectId(tutorId) });
 
             if (!tutor || tutor.totalSlot <= 0) {
                 return res.status(400).json({ error: "No available slots left." });
             }
 
-            // ২. বুকিং ডেটাতে স্ট্যাটাস যোগ করুন
             const newBooking = {
                 ...bookingData,
-                status: "Pending", // অটো-জেনারেটেড স্ট্যাটাস
+                status: "Pending",
                 createdAt: new Date()
             };
 
-            // ৩. বুকিং সেভ করুন
             const result = await bookingCollection.insertOne(newBooking);
 
-            // ৪. টিউটরের স্লট ১ কমিয়ে দিন
             await tutorCollection.updateOne(
                 { _id: new ObjectId(tutorId) },
                 { $inc: { totalSlot: -1 } }
@@ -131,18 +149,13 @@ async function run() {
 
         });
 
-
-
-
-
-
-
-
-        app.get('/tutor/:id', async (req, res) => {
+        app.get('/tutor/:id', verifyToken, async (req, res) => {
             const { id } = req.params;
             if (!ObjectId.isValid(id)) return res.status(400).json({ error: "Invalid ID" });
             const result = await tutorCollection.findOne({ _id: new ObjectId(id) });
+            console.log(result);
             res.json(result);
+
         });
 
         console.log("MongoDB Connected & Auth Initialized!");
